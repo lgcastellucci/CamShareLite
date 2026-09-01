@@ -1,0 +1,114 @@
+import 'package:flutter/foundation.dart';
+import 'package:permission_handler/permission_handler.dart';
+
+import '../models/log_entry.dart';
+import '../services/camera_service.dart';
+import '../services/network_service.dart';
+import '../services/stream_server.dart';
+
+enum AppPhase {
+  initial,
+  requestingPermission,
+  cameraReady,
+  serverRunning,
+  error,
+}
+
+/// Estado central do app — controla a fase da tela, o log visual,
+/// e orquestra câmera + servidor HTTP local.
+class AppState extends ChangeNotifier {
+  final CameraService _cameraService = CameraService();
+  final NetworkService _networkService = NetworkService();
+  StreamServer? _streamServer;
+
+  AppPhase _phase = AppPhase.initial;
+  final List<LogEntry> _logs = [];
+  String? _shareUrl;
+  int _connectedClients = 0;
+
+  AppPhase get phase => _phase;
+  List<LogEntry> get logs => List.unmodifiable(_logs);
+  String? get shareUrl => _shareUrl;
+  int get connectedClients => _connectedClients;
+  CameraService get cameraService => _cameraService;
+
+  void _log(String message, {LogLevel level = LogLevel.info}) {
+    _logs.add(LogEntry(message: message, level: level));
+    notifyListeners();
+  }
+
+  void _setPhase(AppPhase phase) {
+    _phase = phase;
+    notifyListeners();
+  }
+
+  /// Passo 1: solicita permissão de câmera e inicializa o preview.
+  Future<void> requestCameraAndInitialize() async {
+    _setPhase(AppPhase.requestingPermission);
+    _log('Solicitando permissão de câmera...');
+
+    final status = await Permission.camera.request();
+    if (!status.isGranted) {
+      _log('Permissão de câmera negada', level: LogLevel.error);
+      _setPhase(AppPhase.error);
+      return;
+    }
+    _log('Permissão de câmera concedida', level: LogLevel.success);
+
+    try {
+      await _cameraService.initialize();
+      _log('Câmera inicializada', level: LogLevel.success);
+      _setPhase(AppPhase.cameraReady);
+    } catch (e) {
+      _log('Falha ao inicializar câmera: $e', level: LogLevel.error);
+      _setPhase(AppPhase.error);
+    }
+  }
+
+  /// Passo 2: inicia captura contínua + servidor HTTP local.
+  Future<void> startSharing({int port = 8080}) async {
+    // Verifica Wi-Fi antes de tentar subir o servidor.
+    final ip = await _networkService.getLocalIp();
+    if (ip == null) {
+      _log('Conecte-se a uma rede Wi-Fi para compartilhar', level: LogLevel.error);
+      _setPhase(AppPhase.error);
+      return;
+    }
+
+    _cameraService.startFrameCapture();
+
+    _streamServer = StreamServer(
+      frames: _cameraService.frames,
+      onEvent: (message, {isError = false}) {
+        _log(message, level: isError ? LogLevel.error : LogLevel.success);
+        _connectedClients = _streamServer?.connectedClients ?? 0;
+        notifyListeners();
+      },
+    );
+
+    try {
+      final boundPort = await _streamServer!.start(port: port);
+      _shareUrl = 'http://$ip:$boundPort';
+      _log('Link pronto para compartilhar: $_shareUrl', level: LogLevel.info);
+      _setPhase(AppPhase.serverRunning);
+    } catch (e) {
+      _log('Falha ao iniciar servidor: $e', level: LogLevel.error);
+      _setPhase(AppPhase.error);
+    }
+  }
+
+  /// Passo 3: para o compartilhamento, mas mantém o preview da câmera.
+  Future<void> stopSharing() async {
+    await _streamServer?.stop();
+    await _cameraService.stopFrameCapture();
+    _shareUrl = null;
+    _connectedClients = 0;
+    _log('Compartilhamento encerrado', level: LogLevel.info);
+    _setPhase(AppPhase.cameraReady);
+  }
+
+  Future<void> disposeAll() async {
+    await _streamServer?.stop();
+    await _cameraService.dispose();
+  }
+}
