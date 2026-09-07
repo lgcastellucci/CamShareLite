@@ -16,7 +16,7 @@ class CamShareLiteApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AppState(),
       child: MaterialApp(
-        title: 'CamShare Lite',
+        title: 'CamShareLite',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorSchemeSeed: Colors.teal,

@@ -9,12 +9,13 @@ import 'dart:typed_data';
 class StreamServer {
   HttpServer? _server;
   final Stream<Uint8List> frames;
+  final String deviceName;
   int _connectedClients = 0;
 
   /// Callback opcional para refletir eventos no log visual da UI.
   final void Function(String message, {bool isError})? onEvent;
 
-  StreamServer({required this.frames, this.onEvent});
+  StreamServer({required this.frames, this.onEvent, this.deviceName = 'Dispositivo Android'});
 
   int get connectedClients => _connectedClients;
   bool get isRunning => _server != null;
@@ -47,20 +48,48 @@ class StreamServer {
 
   void _serveIndex(HttpRequest request) {
     request.response.headers.contentType = ContentType.html;
+    final safeName = deviceName.replaceAll('<', '').replaceAll('>', '');
     request.response.write('''
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="utf-8">
-  <title>CamShare Lite</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>$safeName — CamShareLite</title>
   <style>
-    body { background:#111; color:#eee; font-family: sans-serif; text-align:center; margin:0; padding:24px; }
-    img { max-width:100%; border-radius:8px; }
-    h1 { font-size:18px; font-weight:normal; opacity:0.8; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: #111;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    img {
+      width: 100vw;
+      height: 100vh;
+      object-fit: cover;
+      display: block;
+    }
+    .device-label {
+      position: fixed;
+      top: 12px;
+      left: 12px;
+      color: #fff;
+      background: rgba(0,0,0,0.5);
+      padding: 6px 12px;
+      border-radius: 999px;
+      font-family: sans-serif;
+      font-size: 14px;
+      z-index: 10;
+    }
   </style>
 </head>
 <body>
-  <h1>CamShare Lite — transmissão ao vivo</h1>
+  <div class="device-label">📷 $safeName</div>
   <img src="/stream" alt="stream ao vivo" onerror="setTimeout(()=>location.reload(), 2000)">
 </body>
 </html>
@@ -70,7 +99,9 @@ class StreamServer {
 
   void _serveStatus(HttpRequest request) {
     request.response.headers.contentType = ContentType.json;
-    request.response.write('{"connected_clients": $_connectedClients}');
+    request.response.write(
+      '{"connected_clients": $_connectedClients, "device_name": "${deviceName.replaceAll('"', '')}"}',
+    );
     request.response.close();
   }
 

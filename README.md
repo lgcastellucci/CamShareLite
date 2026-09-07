@@ -8,36 +8,38 @@
 > underscore.
 
 Este pacote contém o código Dart/Flutter do app conforme o spec (`CAMERAWEB_SPEC.md`).
-**Não inclui** a pasta `android/` completa (gerada por `flutter create`), pois este
-ambiente não tem o Flutter SDK instalado para gerá-la.
 
-## Como integrar
+## Estado atual do projeto
 
-1. Gere o projeto base (se ainda não existir um):
-   ```bash
-   flutter create --org com.cameraweb --project-name camsharelite .
-   ```
-   Isso cria `android/`, `ios/`, etc. Ajuste o `applicationId` em
-   `android/app/build.gradle` para `com.cameraweb.app` (mesmo já publicado).
+O projeto Android real já existe (gerado via `flutter create`, usando
+Kotlin DSL) e já passou por builds no container `BuildCamShareLite`. As
+correções vigentes estão em `android_config/` — use o script
+`apply_android_config.sh` (ver seção abaixo) pra aplicar tudo de uma vez,
+em vez de copiar arquivo por arquivo na mão.
 
-2. Copie a pasta `lib/` deste pacote por cima da gerada, e o `pubspec.yaml`.
+`applicationId` atual: **`com.camsharelite.app`**.
 
-3. Adicione as permissões de `android_manifest_snippet.xml` ao
-   `android/app/src/main/AndroidManifest.xml`.
+## Como aplicar (`apply_android_config.sh`)
 
-4. Em `android/app/build.gradle`, garanta:
-   ```gradle
-   defaultConfig {
-       applicationId "com.cameraweb.app"
-       minSdkVersion 23
-       // manter compileSdk/targetSdk conforme o restante do build
-   }
-   ```
+```bash
+./apply_android_config.sh /caminho/para/o/projeto/real
+```
 
-5. Rode no seu pipeline Docker existente (mesmo do EscolaSync):
-   ```bash
-   flutter clean && flutter pub get && flutter build appbundle
-   ```
+Rode de qualquer lugar (o script se localiza sozinho), passando o caminho
+da raiz do projeto Flutter real — a pasta que contém `android/`, `lib/`,
+`pubspec.yaml`. Se você já estiver dentro dela, pode chamar sem argumento.
+
+O script:
+- Copia `gradle.properties`, `app_build.gradle.kts`, `AndroidManifest.xml`
+  e `MainActivity.kt` de `android_config/` para os caminhos certos dentro
+  de `android/`.
+- Copia os ícones de `store_assets/android_res/` para
+  `android/app/src/main/res/`.
+- Sobrescreve direto, sem backup — rode com o projeto já versionado/commitado
+  se quiser poder reverter.
+
+Depois de rodar, dentro do container: `./gradlew --stop` (se já tiver um
+daemon de antes) e `./build.sh` normalmente.
 
 ## Estrutura
 
@@ -66,6 +68,88 @@ lib/
   (conforme decisão do spec — sem autenticação, público na rede local).
 - Testado conceitualmente para Android 12 / One UI 4.3 (dispositivo do
   usuário) — validar em execução real antes de assumir como definitivo.
+
+## Assets para a Play Store (`store_assets/`)
+
+Gerados programaticamente (design simples: câmera + ondas de transmissão, tema teal do app). **Screenshots reais não estão incluídos** — a Play Store exige capturas da tela rodando de verdade; gere-as depois que o app estiver buildado e rodando no aparelho/emulador.
+
+```
+store_assets/
+  play_store/
+    icon_512.png                    → Play Console → Presença na loja → Ícone do app (512×512)
+    feature_graphic_1024x500.png    → Play Console → Presença na loja → Gráfico de destaque
+  android_res/
+    mipmap-mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi/
+      ic_launcher.png               → ícone legado (launchers sem suporte a adaptive icon)
+      ic_launcher_foreground.png    → camada de primeiro plano do ícone adaptativo
+    mipmap-anydpi-v26/
+      ic_launcher.xml               → referencia background (cor) + foreground
+    values/
+      ic_launcher_background.xml    → cor de fundo do ícone adaptativo (#00897B)
+```
+
+Para aplicar no projeto: copie o conteúdo de `android_res/` por cima de
+`android/app/src/main/res/` (mesclando as pastas `mipmap-*` e `values/`
+existentes, geradas pelo `flutter create`).
+
+## Configuração do Gradle (`android_config/`)
+
+> Aplicado automaticamente pelo `apply_android_config.sh` — a lista abaixo é só
+> a explicação de cada arquivo, não é mais um passo manual obrigatório.
+
+**Atenção: seu projeto usa Kotlin DSL** (`build.gradle.kts`, `settings.gradle.kts`) — os arquivos abaixo já estão no formato certo.
+
+- **`android_config/gradle.properties`** → substitui `android/gradle.properties`
+  (o original ainda estava com `-Xmx8G`, causa do `daemon disappeared`).
+  Preserva as flags `android.newDsl` / `android.builtInKotlin` que o
+  template do Flutter já tinha adicionado.
+
+- **`android_config/app_build.gradle.kts`** → substitui
+  `android/app/build.gradle.kts`. Corrige três coisas que estavam erradas:
+  - `applicationId` estava `com.cameraweb.camsharelite` (efeito colateral
+    do `flutter create --org com.cameraweb --project-name camsharelite`) —
+    agora **`com.camsharelite.app`**, o valor exigido pela ficha do app no
+    Play Console (já passou por `com.cameraweb.app` e `app.camsharelite.com`
+    antes de chegar nesse — o Play Console é quem manda, ele acusa o erro
+    exato quando o pacote enviado não bate com o cadastrado na ficha).
+    O `namespace` continua `com.cameraweb.camsharelite` de propósito, pois
+    é o pacote real da pasta
+    `kotlin/com/cameraweb/camsharelite/MainActivity.kt` — não precisa (e
+    não deve) bater com o `applicationId`.
+  - `minSdk` estava usando o padrão do Flutter — agora fixo em `23`.
+  - `buildTypes.release.signingConfig` estava `signingConfigs.getByName("debug")`
+    (padrão do template) — agora aponta para o `signingConfigs.release`
+    recém-criado, lendo `STORE_FILE`/`KEY_ALIAS`/`STORE_PASSWORD`/`KEY_PASSWORD`
+    das env vars do container.
+
+- **`android_config/AndroidManifest.xml`** → substitui
+  `android/app/src/main/AndroidManifest.xml`. É o manifest original do seu
+  projeto com as permissões do spec (câmera, Wi-Fi, internet, localização)
+  já mescladas no topo.
+
+- **`android_config/MainActivity.kt`** → substitui
+  `android/app/src/main/kotlin/com/cameraweb/camsharelite/MainActivity.kt`.
+  Adiciona um `MethodChannel` (`com.camsharelite/device`) que lê
+  `Settings.Global.DEVICE_NAME` — o nome do dispositivo configurado em
+  Configurações → Sobre o telefone (o mesmo que aparece no Bluetooth/Wi-Fi
+  Direct). Usado pelo `DeviceInfoService` (lado Dart) pra exibir de qual
+  celular está vindo o stream, tanto na tela do app quanto na página web
+  que o cliente acessa.
+
+## Screenshots para a Play Store (`store_assets/play_store/screenshots/`)
+
+4 capturas **reais** do app rodando (não são mockups), cortadas para caber
+no limite de proporção 2:1 que a Play Store exige (as originais eram
+1080×2400/2340, cortadas para 1080×2160):
+
+1. `01_tela_inicial.jpg` — tela "Habilitar Câmera"
+2. `02_camera_pronta.jpg` — preview ativo, botão "Compartilhar"
+3. `03_compartilhando.jpg` — servidor rodando, link exibido
+4. `04_visao_navegador.jpg` — o que o espectador vê no navegador
+
+⚠️ São da versão 1.0.0, **antes** do ajuste de tela cheia e do nome do
+dispositivo. Servem para publicar agora, mas vale recapturar depois que a
+1.0.1 estiver rodando — vai ficar bem mais limpo sem o espaço preto.
 
 ## Não implementado (fora de escopo, conforme spec §7)
 

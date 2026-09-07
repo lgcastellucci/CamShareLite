@@ -3,6 +3,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../models/log_entry.dart';
 import '../services/camera_service.dart';
+import '../services/device_info_service.dart';
 import '../services/network_service.dart';
 import '../services/stream_server.dart';
 
@@ -19,17 +20,20 @@ enum AppPhase {
 class AppState extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
   final NetworkService _networkService = NetworkService();
+  final DeviceInfoService _deviceInfoService = DeviceInfoService();
   StreamServer? _streamServer;
 
   AppPhase _phase = AppPhase.initial;
   final List<LogEntry> _logs = [];
   String? _shareUrl;
   int _connectedClients = 0;
+  String _deviceName = 'Dispositivo Android';
 
   AppPhase get phase => _phase;
   List<LogEntry> get logs => List.unmodifiable(_logs);
   String? get shareUrl => _shareUrl;
   int get connectedClients => _connectedClients;
+  String get deviceName => _deviceName;
   CameraService get cameraService => _cameraService;
 
   void _log(String message, {LogLevel level = LogLevel.info}) {
@@ -40,6 +44,18 @@ class AppState extends ChangeNotifier {
   void _setPhase(AppPhase phase) {
     _phase = phase;
     notifyListeners();
+  }
+
+  /// Chamado uma vez, ao abrir o app: se a permissão de câmera já foi
+  /// concedida antes, entra direto ativando a câmera e já inicia o
+  /// compartilhamento automaticamente — sem precisar tocar em nenhum botão.
+  /// Se a permissão ainda não foi concedida, dispara o pedido normalmente
+  /// (o diálogo do sistema aparece do mesmo jeito).
+  Future<void> bootstrap() async {
+    await requestCameraAndInitialize();
+    if (_phase == AppPhase.cameraReady) {
+      await startSharing();
+    }
   }
 
   /// Passo 1: solicita permissão de câmera e inicializa o preview.
@@ -54,6 +70,9 @@ class AppState extends ChangeNotifier {
       return;
     }
     _log('Permissão de câmera concedida', level: LogLevel.success);
+
+    _deviceName = await _deviceInfoService.getDeviceName();
+    _log('Dispositivo identificado: $_deviceName', level: LogLevel.info);
 
     try {
       await _cameraService.initialize();
@@ -79,6 +98,7 @@ class AppState extends ChangeNotifier {
 
     _streamServer = StreamServer(
       frames: _cameraService.frames,
+      deviceName: _deviceName,
       onEvent: (message, {isError = false}) {
         _log(message, level: isError ? LogLevel.error : LogLevel.success);
         _connectedClients = _streamServer?.connectedClients ?? 0;
