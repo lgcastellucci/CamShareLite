@@ -1,7 +1,7 @@
 name: camsharelite
 description: "CamShare Lite — câmera ao vivo em stream MJPEG na rede local (LAN), sem conta e sem nuvem."
 publish_to: 'none'
-version: 1.0.1+2
+version: 1.0.2+4
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

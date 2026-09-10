@@ -4,6 +4,7 @@ import 'package:permission_handler/permission_handler.dart';
 import '../models/log_entry.dart';
 import '../services/camera_service.dart';
 import '../services/device_info_service.dart';
+import '../services/foreground_service_controller.dart';
 import '../services/network_service.dart';
 import '../services/stream_server.dart';
 
@@ -21,6 +22,7 @@ class AppState extends ChangeNotifier {
   final CameraService _cameraService = CameraService();
   final NetworkService _networkService = NetworkService();
   final DeviceInfoService _deviceInfoService = DeviceInfoService();
+  final ForegroundServiceController _foregroundService = ForegroundServiceController();
   StreamServer? _streamServer;
 
   AppPhase _phase = AppPhase.initial;
@@ -94,7 +96,21 @@ class AppState extends ChangeNotifier {
       return;
     }
 
+    // Notificação é obrigatória pro Foreground Service ficar visível
+    // (Android 13+ exige permissão em tempo de execução pra isso). Se
+    // negada, o Service ainda tenta rodar, mas sem garantia de manter
+    // prioridade — por isso só logamos um aviso, não bloqueamos o fluxo.
+    final notificationStatus = await Permission.notification.request();
+    if (!notificationStatus.isGranted) {
+      _log(
+        'Permissão de notificação negada — o app pode não continuar rodando com a tela apagada',
+        level: LogLevel.warning,
+      );
+    }
+
     _cameraService.startFrameCapture();
+    await _foregroundService.start();
+    _log('Serviço em primeiro plano ativado (mantém rodando com tela apagada)', level: LogLevel.success);
 
     _streamServer = StreamServer(
       frames: _cameraService.frames,
@@ -121,6 +137,7 @@ class AppState extends ChangeNotifier {
   Future<void> stopSharing() async {
     await _streamServer?.stop();
     await _cameraService.stopFrameCapture();
+    await _foregroundService.stop();
     _shareUrl = null;
     _connectedClients = 0;
     _log('Compartilhamento encerrado', level: LogLevel.info);
@@ -129,6 +146,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> disposeAll() async {
     await _streamServer?.stop();
+    await _foregroundService.stop();
     await _cameraService.dispose();
   }
 }

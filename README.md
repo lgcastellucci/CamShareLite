@@ -129,12 +129,42 @@ existentes, geradas pelo `flutter create`).
 
 - **`android_config/MainActivity.kt`** → substitui
   `android/app/src/main/kotlin/com/cameraweb/camsharelite/MainActivity.kt`.
-  Adiciona um `MethodChannel` (`com.camsharelite/device`) que lê
-  `Settings.Global.DEVICE_NAME` — o nome do dispositivo configurado em
-  Configurações → Sobre o telefone (o mesmo que aparece no Bluetooth/Wi-Fi
-  Direct). Usado pelo `DeviceInfoService` (lado Dart) pra exibir de qual
-  celular está vindo o stream, tanto na tela do app quanto na página web
-  que o cliente acessa.
+  Tem dois `MethodChannel`s agora: `com.camsharelite/device` (nome do
+  dispositivo, já existia) e **`com.camsharelite/foreground_service`**
+  (novo — inicia/para o Foreground Service abaixo). Também ativa exibição
+  de ponta a ponta no `onCreate` via `WindowCompat.setDecorFitsSystemWindows`
+  (aviso do Play Console sobre Android 15+/targetSdk 35 — não dá pra usar
+  `enableEdgeToEdge()` direto porque `FlutterActivity` estende `Activity`
+  puro, não `ComponentActivity`; exige a dependência `androidx.core:core-ktx`,
+  já incluída no `app_build.gradle.kts`).
+
+- **`android_config/StreamForegroundService.kt`** (novo) → vai em
+  `android/app/src/main/kotlin/com/cameraweb/camsharelite/StreamForegroundService.kt`.
+  Foreground Service "casca" (`foregroundServiceType="camera"`) que
+  mantém o processo com prioridade elevada enquanto o compartilhamento
+  está ativo — sem ele, o Android tende a suspender o acesso à câmera
+  quando a tela apaga ou o app vai pra segundo plano (ver §6.4 do spec,
+  decisão atualizada). Mostra uma notificação persistente obrigatória
+  ("CamShareLite está transmitindo ao vivo") com botão de parar. A câmera
+  e o servidor HTTP continuam rodando no código Dart normal — este
+  Service só segura o status de foreground junto ao sistema.
+
+## Foreground Service — o que mudou (spec §6.4)
+
+Decisão anterior era "só primeiro plano, sem Foreground Service". Isso
+mudou: agora o app usa um Foreground Service de verdade pra continuar
+rodando com a tela apagada/bloqueada. Implicações:
+
+- **Notificação persistente é obrigatória** enquanto compartilhando —
+  não dá pra tirar, é exigência do próprio Android pra apps que usam
+  câmera em segundo plano, não escolha de design.
+- **Novas permissões** no Manifest: `FOREGROUND_SERVICE`,
+  `FOREGROUND_SERVICE_CAMERA` (Android 14+), `POST_NOTIFICATIONS`
+  (Android 13+ — pedida em tempo de execução, junto com a de câmera).
+  Se o usuário negar a de notificação, o app avisa no log mas continua
+  funcionando (só perde a garantia de rodar com tela apagada).
+- **Mais consumo de bateria** — a câmera continua processando frames o
+  tempo todo, não só quando a tela está visível.
 
 ## Screenshots para a Play Store (`store_assets/play_store/screenshots/`)
 
